@@ -34,6 +34,7 @@
 #ifdef __linux__
 # include <linux/fs.h>
 # include <sys/sendfile.h>
+# include <malloc.h>
 #endif
 
 /* ocaml/ocaml/unixsupport.c */
@@ -44,13 +45,20 @@ extern void uerror(char *cmdname, value cmdarg);
 #define TRIED_AND_FAILED (1)
 #define OK 0
 
+#define XFER_BUFSIZ (2*1024*1024)
+
 CAMLprim value stub_sendfile64(value in_fd, value out_fd, value len){
   CAMLparam3(in_fd, out_fd, len);
   CAMLlocal1(result);
   size_t c_len = Int64_val(len);
   size_t bytes;
+  size_t remaining, chunk;
   int c_in_fd = Int_val(in_fd);
   int c_out_fd = Int_val(out_fd);
+  /* We do not want to use a static buffer. This is a hack and is not
+     thread-safe */
+  static char *buffer = NULL;
+  int flags;
 
   int rc = NOT_IMPLEMENTED;
 
@@ -58,26 +66,36 @@ CAMLprim value stub_sendfile64(value in_fd, value out_fd, value len){
 
 #ifdef __linux__
   rc = TRIED_AND_FAILED;
-  bytes = sendfile(c_out_fd, c_in_fd, NULL, c_len);
-  if (bytes != -1) {
-      rc = OK;
-  } else if (errno == EINVAL) {
-      int flags;
-      int result = 0;
-
-      flags = fcntl(c_in_fd, F_GETFL, NULL);
-      if (flags > 0) {
-          result = fcntl(c_in_fd, F_SETFL, flags & ~O_DIRECT);
-
-          if (result == 0) {
-              bytes = sendfile(c_out_fd, c_in_fd, NULL, c_len);
-              if (bytes != -1) {
-                  rc = OK;
-              }
-              fcntl(c_in_fd, F_SETFL, flags);
-          }
-      }
+  bytes = 0;
+  if (!buffer) {
+    /* Let's have a 2MB chunk for copying */
+    buffer = memalign(sysconf(_SC_PAGESIZE), XFER_BUFSIZ);
+    if (!buffer) goto fail;
   }
+  /* HACK!! Forcing O_DIRECT on for hackish testing */
+  flags = fcntl(c_out_fd, F_GETFL, NULL);
+  if (flags > 0 && !(flags & O_DIRECT))
+    fcntl(c_out_fd, F_SETFL, flags | O_DIRECT);
+  
+  remaining = c_len;
+  while (remaining > 0) {
+    ssize_t bread;
+    ssize_t bwritten = 0;
+
+    bread = read(c_in_fd, buffer, (remaining < XFER_BUFSIZ)?remaining:XFER_BUFSIZ) ;
+    if (bread < 0) goto fail;
+    while (bwritten < bread) {
+      ssize_t ret;
+
+      ret = write(c_out_fd, buffer + bwritten, bread - bwritten);
+      if (ret <= 0) goto fail;
+      bytes += ret;
+      bwritten += ret;
+      remaining -= ret;
+    }
+  }
+  rc = OK;
+fail:
 #endif
 
   leave_blocking_section();
