@@ -47,14 +47,40 @@ extern void uerror(char *cmdname, value cmdarg);
 
 #define XFER_BUFSIZ (2*1024*1024)
 
-CAMLprim value stub_sendfile64(value in_fd, value out_fd, value len){
-  CAMLparam3(in_fd, out_fd, len);
+CAMLprim value stub_init(value in_fd, value out_fd)
+{
+  CAMLparam2(in_fd, out_fd);
+  int c_in_fd = Int_val(in_fd);
+  int c_out_fd = Int_val(out_fd);
+  void *handle = NULL;
+
+  /* initialise handle */
+
+  CAMLreturn((value) handle);
+}
+
+CAMLprim value stub_cleanup(value handle)
+{
+  CAMLparam1(handle);
+
+  /* Cast handle to the thing you need and assign it to a local variable. */
+  /* Then do the cleanup. */
+
+  CAMLreturn(Val_unit);
+}
+
+CAMLprim value stub_direct_copy(value handle, value len){
+  CAMLparam2(handle, len);
   CAMLlocal1(result);
   size_t c_len = Int64_val(len);
   size_t bytes;
   size_t remaining, chunk;
-  int c_in_fd = Int_val(in_fd);
-  int c_out_fd = Int_val(out_fd);
+
+  /* TODO: Instead of this... */
+  int c_in_fd = 0;
+  int c_out_fd = 0;
+  /* ...cast handle to the thing you need and assign it to a local variable. */
+
   /* We do not want to use a static buffer. This is a hack and is not
      thread-safe */
   static char *buffer = NULL;
